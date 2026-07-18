@@ -45,6 +45,13 @@ build-standalone.cmd   — всё-в-одном (сначала положите
 
 ffmpeg можно взять на [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) (сборка essentials, GPL).
 
+## Версия для macOS
+
+В каталоге [`mac/`](mac/) — нативный порт на Swift/SwiftUI с тем же
+пайплайном (ffmpeg, хромакей, VP9 с альфой, патч Duration). Сборка:
+`cd mac && swift run StickerStudio` или `./make-app.sh`. Подробности —
+в [mac/README.md](mac/README.md).
+
 ## Как это работает
 
 Telegram проверяет длительность видеостикера по полю Duration в контейнере WebM/EBML. После кодирования программа находит это поле (id `44 89`) и записывает валидное значение `1.0` — клиенты Telegram принимают такой стикер длиной до 6 секунд. Кодирование — libvpx-vp9 с `yuva420p` (альфа-канал), двухпроходное, с итеративным подбором битрейта под 256 КБ.
