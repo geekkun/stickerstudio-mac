@@ -29,9 +29,16 @@ public enum FFmpeg {
         set { currentLock.lock(); _current = newValue; currentLock.unlock() }
     }
 
-    /// Поиск ffmpeg: рядом с бандлом/бинарником, потом Homebrew, потом PATH.
+    /// Поиск ffmpeg: env-переменная → бандл → рядом с бинарником →
+    /// известные префиксы (включая Homebrew в домашней папке) → PATH →
+    /// login-shell (для .app, запущенного из Finder без пользовательского PATH).
     public static func find() -> String? {
         var candidates: [String] = []
+
+        if let override = ProcessInfo.processInfo.environment["STICKERSTUDIO_FFMPEG"],
+           !override.isEmpty {
+            candidates.append(override)
+        }
 
         #if os(macOS)
         // Внутри .app: Contents/Resources/ffmpeg (кладётся скриптом сборки).
@@ -45,8 +52,12 @@ public enum FFmpeg {
             .deletingLastPathComponent()
         candidates.append(exeDir.appendingPathComponent("ffmpeg").path)
 
+        let home = NSHomeDirectory()
         candidates.append("/opt/homebrew/bin/ffmpeg")
         candidates.append("/usr/local/bin/ffmpeg")
+        candidates.append(home + "/homebrew/bin/ffmpeg")   // brew в кастомном префиксе
+        candidates.append(home + "/.homebrew/bin/ffmpeg")
+        candidates.append("/opt/local/bin/ffmpeg")         // MacPorts
         candidates.append("/usr/bin/ffmpeg")
 
         let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
@@ -58,10 +69,43 @@ public enum FFmpeg {
 
         let fm = FileManager.default
         for c in candidates where fm.isExecutableFile(atPath: c) {
+            SSLog.log("ffmpeg: \(c)")
             return c
         }
+
+        #if os(macOS)
+        // GUI-приложение не наследует PATH из терминала — спрашиваем login-shell.
+        if let fromShell = loginShellLookup(), fm.isExecutableFile(atPath: fromShell) {
+            SSLog.log("ffmpeg (login shell): \(fromShell)")
+            return fromShell
+        }
+        #endif
+        SSLog.log("ffmpeg не найден (кандидатов: \(candidates.count))")
         return nil
     }
+
+    #if os(macOS)
+    static func loginShellLookup() -> String? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-l", "-c", "command -v ffmpeg"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let path = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return path.isEmpty ? nil : path
+    }
+    #endif
 
     /// Запуск ffmpeg с ожиданием завершения. Возвращает stderr (там ffmpeg
     /// пишет и ошибки, и прогресс) и код выхода.
@@ -70,7 +114,11 @@ public enum FFmpeg {
                            exitCode: inout Int32) -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ffmpegPath)
-        process.arguments = arguments
+        // -nostdin: ffmpeg в GUI-приложении не должен трогать терминал —
+        // чтение tty из фонового процесса подвешивает загрузку.
+        process.arguments = ["-nostdin"] + arguments
+        process.standardInput = FileHandle.nullDevice
+        SSLog.log("run: ffmpeg " + arguments.joined(separator: " "))
 
         let errPipe = Pipe()
         let outPipe = Pipe()
@@ -81,6 +129,7 @@ public enum FFmpeg {
             try process.run()
         } catch {
             exitCode = -1
+            SSLog.log("run: запуск не удался — \(error.localizedDescription)")
             return error.localizedDescription
         }
         current = process
@@ -95,6 +144,7 @@ public enum FFmpeg {
         current = nil
 
         exitCode = process.terminationStatus
+        SSLog.log("run: exit \(exitCode)")
         return String(data: errData, encoding: .utf8) ?? ""
     }
 
@@ -107,7 +157,12 @@ public enum FFmpeg {
     public static func probe(_ ffmpegPath: String, input: String) -> ProbeInfo {
         var code: Int32 = 0
         let log = run(ffmpegPath, ["-hide_banner", "-i", input], exitCode: &code)
-        return parseProbeLog(log)
+        let info = parseProbeLog(log)
+        SSLog.log(info.ok
+            ? "probe: \(info.width)x\(info.height) \(inv(info.duration))с " +
+              "\(inv(info.fps))fps alpha=\(info.hasAlpha)"
+            : "probe: ошибка — \(info.error ?? "?")")
+        return info
     }
 
     /// Чистый парсер лога `ffmpeg -i` — вынесен отдельно ради юнит-тестов.

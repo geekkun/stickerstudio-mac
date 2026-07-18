@@ -1,11 +1,15 @@
 #!/bin/bash
 # Сборка StickerStudio.app из SwiftPM-билда (запускать на macOS).
 #
-#   ./make-app.sh              — release-сборка + бандл в dist/StickerStudio.app
+#   ./make-app.sh                    — release-сборка + бандл в dist/StickerStudio.app
+#   FFMPEG_BIN=/path/ffmpeg ./make-app.sh   — встроить конкретный бинарник
+#   NO_FFMPEG=1 ./make-app.sh        — собрать без встроенного ffmpeg
 #
-# ffmpeg: если рядом со скриптом лежит бинарник `ffmpeg`, он попадёт в
-# Contents/Resources и приложение станет самодостаточным. Иначе приложение
-# найдёт ffmpeg из Homebrew (/opt/homebrew/bin) или PATH.
+# ffmpeg встраивается в Contents/Resources автоматически: берётся первый
+# найденный из FFMPEG_BIN, ./ffmpeg, PATH и типовых префиксов Homebrew
+# (включая ~/homebrew). Homebrew-бинарник слинкован с dylib-ами своего
+# префикса — такой бандл работает на этой машине, но не для раздачи другим;
+# для распространения подложите статическую сборку через FFMPEG_BIN.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -30,14 +34,38 @@ if command -v sips >/dev/null && command -v iconutil >/dev/null && [ -f ../src/u
     iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns" || true
 fi
 
-# Встроенный ffmpeg (опционально)
-if [ -f ffmpeg ]; then
-    cp ffmpeg "$APP/Contents/Resources/ffmpeg"
+# --- встраивание ffmpeg ---
+find_ffmpeg() {
+    if [ -n "${FFMPEG_BIN:-}" ] && [ -x "$FFMPEG_BIN" ]; then
+        echo "$FFMPEG_BIN"; return
+    fi
+    if [ -x ffmpeg ]; then
+        echo "$PWD/ffmpeg"; return
+    fi
+    command -v ffmpeg 2>/dev/null && return
+    for c in /opt/homebrew/bin/ffmpeg /usr/local/bin/ffmpeg \
+             "$HOME/homebrew/bin/ffmpeg" "$HOME/.homebrew/bin/ffmpeg" \
+             /opt/local/bin/ffmpeg; do
+        if [ -x "$c" ]; then echo "$c"; return; fi
+    done
+    return 1
+}
+
+if [ "${NO_FFMPEG:-0}" = "1" ]; then
+    echo "ffmpeg не встраивается (NO_FFMPEG=1): приложение будет искать его само"
+elif FF="$(find_ffmpeg)"; then
+    cp "$FF" "$APP/Contents/Resources/ffmpeg"
     chmod +x "$APP/Contents/Resources/ffmpeg"
-    echo "ffmpeg встроен в бандл"
+    echo "ffmpeg встроен: $FF"
+    if command -v otool >/dev/null && \
+       otool -L "$FF" | grep -qE "$HOME|/opt/homebrew|/usr/local/Cellar"; then
+        echo "⚠ этот ffmpeg слинкован с библиотеками Homebrew: бандл будет"
+        echo "  работать на этой машине, но для раздачи другим возьмите"
+        echo "  статическую сборку и соберите с FFMPEG_BIN=/путь/к/ffmpeg"
+    fi
 else
-    echo "ffmpeg не встроен: приложение будет искать его в Homebrew/PATH"
-    echo "(чтобы встроить: положите бинарник ffmpeg рядом с make-app.sh)"
+    echo "⚠ ffmpeg не найден — бандл собран без него; приложение поищет"
+    echo "  ffmpeg в Homebrew/PATH при запуске (brew install ffmpeg)"
 fi
 
 # ad-hoc подпись, чтобы бандл запускался локально без Developer ID

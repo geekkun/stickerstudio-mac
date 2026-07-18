@@ -8,8 +8,11 @@
 
 - macOS 13+ (Ventura), Apple Silicon или Intel
 - Xcode 15+ (или Swift 5.9+ toolchain)
-- ffmpeg (сборка с libvpx): `brew install ffmpeg` — либо положите бинарник
-  `ffmpeg` рядом с приложением / в `mac/` перед сборкой бандла
+- ffmpeg (сборка с libvpx): `brew install ffmpeg`. Кастомные префиксы
+  Homebrew (например `~/homebrew`) поддерживаются; можно и явно указать
+  бинарник переменной `STICKERSTUDIO_FFMPEG=/путь/к/ffmpeg`.
+  `make-app.sh` сам находит ffmpeg и встраивает его в бандл
+  (`NO_FFMPEG=1` — не встраивать, `FFMPEG_BIN=…` — встроить конкретный)
 
 ## Сборка и запуск
 
@@ -64,7 +67,9 @@ CoreGraphics и делает пайплайн тестируемым без UI. 
 
 - Хромакей считается на CPU (как в оригинале); Metal/vImage — следующая фаза
 - Автообновление не портировано (на macOS это Sparkle либо App Store)
-- ffmpeg не вшит в бинарник gzip-ом: кладётся в Resources бандла или берётся
-  из Homebrew/PATH
+- ffmpeg не вшит в бинарник gzip-ом: `make-app.sh` кладёт его в Resources
+  бандла автоматически, при запуске без бандла берётся из Homebrew/PATH.
+  Диагностика поиска и всех запусков ffmpeg пишется в stderr с префиксом
+  `[sticker]` (отключается `STICKERSTUDIO_QUIET=1`)
 - Результат сохраняется через стандартный NSSavePanel (готовность к sandbox),
   имя по умолчанию — `<исходник>_sticker.webm`

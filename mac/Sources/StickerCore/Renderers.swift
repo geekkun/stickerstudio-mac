@@ -66,7 +66,8 @@ final class CancellableRunner {
     func run(_ executable: String, _ arguments: [String], generation: Int64) -> (String, Int32) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
+        process.arguments = ["-nostdin"] + arguments
+        process.standardInput = FileHandle.nullDevice
         let errPipe = Pipe()
         let outPipe = Pipe()
         process.standardError = errPipe

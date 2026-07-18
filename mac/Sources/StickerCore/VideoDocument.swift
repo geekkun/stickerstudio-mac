@@ -1,5 +1,20 @@
 import Foundation
 
+/// Потокобезопасный флаг для сигнала между рабочим и watcher-потоком.
+final class AtomicFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var raw: Bool
+
+    init(_ value: Bool) {
+        raw = value
+    }
+
+    var value: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return raw }
+        set { lock.lock(); raw = newValue; lock.unlock() }
+    }
+}
+
 /// Открытый документ: probe-инфо, превью-кадры в памяти, состояние правок
 /// и undo-стек. Порт VideoDoc.cs; декодирование картинок для показа —
 /// забота UI-слоя (ImageIO), здесь только байты PNG/JPEG.
@@ -61,6 +76,7 @@ public final class VideoDocument {
     /// progress(процент 0..100, текст). Возвращает nil при успехе, иначе текст ошибки.
     public func load(ffmpeg: String, path: String,
                      progress: ((Int, String) -> Void)?) -> String? {
+        SSLog.log("load: \(path)")
         sourcePath = path
         info = FFmpeg.probe(ffmpeg, input: path)
         guard info.ok else {
@@ -115,15 +131,11 @@ public final class VideoDocument {
         args.append((tmpDir as NSString).appendingPathComponent("f%05d." + ext))
 
         // прогресс по числу появившихся файлов
-        var done = false
-        let doneLock = NSLock()
+        SSLog.log("load: извлечение превью-кадров (ожидается ~\(expected))")
+        let extracting = AtomicFlag(true)
         if let progress = progress {
             DispatchQueue.global(qos: .utility).async {
-                while true {
-                    doneLock.lock()
-                    let finished = done
-                    doneLock.unlock()
-                    if finished { return }
+                while extracting.value {
                     let n = (try? FileManager.default
                         .contentsOfDirectory(atPath: tmpDir).count) ?? 0
                     let pct = min(99, n * 100 / max(1, expected))
@@ -135,9 +147,7 @@ public final class VideoDocument {
 
         var code: Int32 = 0
         let err = FFmpeg.run(ffmpeg, args, exitCode: &code)
-        doneLock.lock()
-        done = true
-        doneLock.unlock()
+        extracting.value = false
         if code != 0 {
             return "Не удалось прочитать видео: " + FFmpeg.lastLine(err)
         }
@@ -160,6 +170,7 @@ public final class VideoDocument {
             return "Не удалось извлечь кадры из видео"
         }
 
+        SSLog.log("load: готово, кадров превью: \(frames.count)")
         progress?(100, "Готово")
         return nil
     }
