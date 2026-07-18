@@ -21,5 +21,28 @@ jobs:
         run: swift build --package-path mac
       - name: Unit tests
         run: swift test --package-path mac
-      - name: Build app bundle
-        run: cd mac && ./make-app.sh
+      - name: Install ffmpeg + dylibbundler
+        run: |
+          brew install dylibbundler
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+      - name: Build portable app bundle
+        run: cd mac && PORTABLE=1 ./make-app.sh
+      - name: Smoke-test bundled ffmpeg
+        run: |
+          mac/dist/StickerStudio.app/Contents/Resources/ffmpeg -version | head -1
+          # ffmpeg внутри бандла не должен ссылаться на пути Homebrew
+          if otool -L mac/dist/StickerStudio.app/Contents/Resources/ffmpeg \
+             | grep -E "/opt/homebrew|/usr/local/Cellar|$HOME"; then
+            echo "portable check failed" >&2
+            exit 1
+          fi
+      - name: Zip app
+        run: |
+          cd mac/dist
+          ditto -c -k --keepParent StickerStudio.app StickerStudio-macOS-arm64.zip
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StickerStudio-macOS-arm64
+          path: mac/dist/StickerStudio-macOS-arm64.zip
+          if-no-files-found: error

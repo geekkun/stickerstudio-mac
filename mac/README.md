@@ -26,8 +26,16 @@ open Package.swift          # схема StickerStudio → Run
 swift run StickerStudio
 
 # вариант 3: полноценный .app-бандл
-./make-app.sh               # → dist/StickerStudio.app
+./make-app.sh               # → dist/StickerStudio.app (ffmpeg внутри)
+PORTABLE=1 ./make-app.sh    # переносимый бандл: dylib-и ffmpeg тоже внутри
+                            # (нужен brew install dylibbundler)
 ```
+
+Готовый переносимый бандл (arm64) собирается и в CI: артефакт
+**StickerStudio-macOS-arm64** у каждого прогона workflow «mac» в Actions.
+Скачанный zip помечается карантином Gatekeeper — при первом запуске
+используйте правый клик → «Открыть» (или `xattr -dr com.apple.quarantine
+StickerStudio.app`), подпись у бандла ad-hoc.
 
 ## Тесты и CLI
 
