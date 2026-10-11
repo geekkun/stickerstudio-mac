@@ -31,6 +31,7 @@
 ### Use Subagents
 - Use subagents for parallel independent work (searching, reading files, implement + review).
 - **Size the fan-out to the work.** Mostly sequential work gets 2–3 agents, usually one implementer and one reviewer. Clearly distinct tasks can run 5–6 at once. Never more: 15 parallel agents on guest-bot burned a week's usage limit in about a day. Never run two agents that edit the same file. A project's CLAUDE.md or plan may set a lower cap.
+- **Keep every agent's context small** — each tool call re-sends all of it (guest-bot agents hit 200–500k tokens per task and the account limit mid-batch): grep and ranged reads, never whole large files; quiet targeted tests while working, the full suite once before the PR, never paste full logs; screenshots only for UI changes; high-effort review only for risky PRs (migrations, auth, money, privacy). Pattern: guest-bot `docs/cloud-sessions.md` «Working efficiently».
 
 ### After Every Correction
 - When the user corrects a mistake, update the relevant CLAUDE.md so it doesn't recur.
@@ -59,6 +60,9 @@ Everything above the PROJECT section comes from the meta-repo (`geekkun/meta`); 
 **How:** one issue per item, in the same session, without waiting to be asked:
 `gh issue create -R geekkun/meta --label upstream --title "<repo>: <one line>" --body "<what> / <why — the bug, cost or owner's call> / <where — file + PR link> / <proposal: shared or which layer, or project-only>"`.
 - Every item needs a **reason**. "We prefer X" with no cost or bug behind it stays project-only and is not filed.
+- **Search first:** `gh issue list -R geekkun/meta --state all --search "<keywords>"` and grep the layers. If it's covered, comment on that issue (e.g. a simpler variant) instead of filing a new one.
+- **It must change what another repo's session would do.** State it in one sentence without this repo's names. If you can't, it's project-only. A library gotcha counts only when its failure is silent and costly.
+- **Propose the exact text** (1–3 lines) and an existing layer: `shared`, `lang/<python|typescript|swift>` or `platform/<web|telegram-bot|ios|android>`. Implementation detail stays in this repo, referenced as `Pattern: <repo> <file>`.
 - A deviation also goes in this repo's PROJECT section as `**Deviates from meta:** <rule> — <reason> (meta#N)`, so sync never "fixes" it back and the audit can find it.
 - Never edit the synced sections above PROJECT in this repo: the next sync overwrites them. Change the rule in meta, or record the deviation.
 - No `gh` or no network (cloud sandbox, offline): append the same fields to `docs/meta-feedback.md` and commit it; the meta audit collects it.
@@ -89,17 +93,20 @@ No changelog section in `CLAUDE.md`. **Each PR adds one file `docs/changes/YYYY-
 - Docstrings / JSDoc for public functions
 - Keep functions small and focused
 - Prefer explicit over implicit
+- **Never blindly retry a call with side effects** (registers, issues a code, charges). Retry only when the request provably never left: connect timeout, DNS failure, connection refused. A read timeout, a reset after sending or a bad response = one attempt, and the user is told to try again later. Pattern: imperiya_grez `core/api.py` `_never_sent`.
 
 ## Security
 
 - Secrets in `.env` file, gitignored. Never commit tokens or keys.
 - Bot tokens, API keys, SECRET_KEY — environment variables only.
 - Input validation at all boundaries.
+- **Screenshots, GIFs and demos for docs or QA never show real people.** Run the app on a fresh data dir seeded with invented records, kept fresh so it never refreshes from the real API. Pattern: imperiya_grez `docs/changes/2026-10-11-guide-screenshots.md`.
 
 ## Docker
 
 - Build from the official slim images (`python:3.13-slim` / `python:3.14-slim`), multi-stage for production.
 - Everything runs in Docker: tests, lockfile regeneration, one-off scripts.
+- **A root container writing into a host-owned bind mount** (`data/`): an atomic write via `mkstemp` + `os.replace` leaves a 0600 root file, the deploy user's pre-deploy backup `tar` can't read it, and every deploy stops. `chmod 0644` the temp file, `chown` it to the data dir's owner when euid is 0, then replace; sweep stale `*.tmp` under the same lock.
 
 ## CI/CD
 
@@ -108,7 +115,8 @@ No changelog section in `CLAUDE.md`. **Each PR adds one file `docs/changes/YYYY-
 - **CI (PR):** lint with ruff → Docker build (Buildx + GHA cache) → import verify → tests
 - **Deploy (push to main):** build + test → SSH to VPS → `git pull && docker compose up -d --build` → health check
 - `paths-ignore`: `**/*.md`, `docs/**`, `.claude/**`, `.gitignore`, `LICENSE` (and `tests/**` on deploy). A bare `*.md` matches only the repo root, so a docs-only PR touching a package's `CLAUDE.md` still deploys.
-- Required GitHub Secrets for deploy: `VPS_SSH_KEY`, `VPS_HOST`, `VPS_USER`, `VPS_PORT`, `DEPLOY_PATH`
+- Required GitHub Secrets for deploy: `VPS_SSH_KEY`, `VPS_HOST`, `VPS_USER`, `VPS_PORT`, `DEPLOY_PATH`, plus `VPS_KNOWN_HOSTS` (the shared deploy template warns and falls back to `accept-new` without it)
+- **Fill `VPS_KNOWN_HOSTS` from the box itself:** `cat /etc/ssh/ssh_host_*_key.pub` over an SSH session you already trust, fingerprints checked against your local known_hosts, stored as `* <type> <key>` lines (the `*` works whatever `VPS_HOST` holds). The deploy uses `StrictHostKeyChecking=yes`. Never `ssh-keyscan` the shared box (its rate limit blocked port 22) and never `accept-new` on a fresh runner (it verifies nothing).
 - Django projects: add migration check (`makemigrations --check --dry-run`) to CI
 - Next.js projects: artifact-based deploy with PM2 process manager
 <!-- LAYER:shared:END -->
