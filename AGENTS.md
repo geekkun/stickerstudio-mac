@@ -112,7 +112,9 @@ No changelog section in `CLAUDE.md`. **Each PR adds one file `docs/changes/YYYY-
 
 - GitHub Actions for all projects
 - Shared workflow templates in `shared/.github/workflows/`
-- **CI (PR):** lint with ruff → Docker build (Buildx + GHA cache) → import verify → tests
+- **CI (PR):** lint with ruff → Docker build (Buildx + GHA cache) → import verify → tests, in **one job** (each job is billed rounded up to a whole minute). `concurrency` keyed by PR number, `cancel-in-progress` for PRs only (a main run is the deploy gate). Build the runtime image only on main.
+- **The runner is a switch, not a rewrite:** `runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '"ubuntu-latest"') }}` in CI and Deploy. `gh variable set CI_RUNS_ON --body '["self-hosted","<label>"]'` moves both to the owner's machine (free minutes, warm Docker cache: guest-bot 1 m 33 s vs 5 m 46 s); deleting the variable moves back. A job aimed at an offline runner waits up to 24 h: flip the variable. **Private repos only:** a self-hosted runner runs every PR's code as the runner user.
+- **Self-hosted gotchas:** `~` is the owner's home, so the deploy key and known_hosts go under `$RUNNER_TEMP` (trap-removed), never `~/.ssh`; `actions/setup-python` fails on any Mac but GitHub's (skip it when `runner.environment == 'self-hosted'`, use host Python in a `$RUNNER_TEMP` venv); buildx `driver: docker` with empty GHA cache inputs; prune only the CI's own images by label (`docker image prune -f --filter label=<repo>-ci=1`). Detail: `docs/references/self-hosted-runner.md`.
 - **Deploy (push to main):** build + test → SSH to VPS → `git pull && docker compose up -d --build` → health check
 - `paths-ignore`: `**/*.md`, `docs/**`, `.claude/**`, `.gitignore`, `LICENSE` (and `tests/**` on deploy). A bare `*.md` matches only the repo root, so a docs-only PR touching a package's `CLAUDE.md` still deploys.
 - Required GitHub Secrets for deploy: `VPS_SSH_KEY`, `VPS_HOST`, `VPS_USER`, `VPS_PORT`, `DEPLOY_PATH`, plus `VPS_KNOWN_HOSTS` (the shared deploy template warns and falls back to `accept-new` without it)
