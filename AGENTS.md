@@ -4,6 +4,10 @@
 <!-- LAYER:shared:START -->
 # Shared Conventions
 
+## Owner
+
+- **Telegram user ID: `108632067`.** Use it as the default for every owner/superadmin setting (`SUPERADMIN_ID`, `OWNER_TG_ID`, `owner_tg_id`, startup DMs) and in `.env.example`; don't ask for it.
+
 ## Git
 
 - Commit messages: `type: short description` (feat, fix, refactor, docs, ci, chore)
@@ -32,6 +36,14 @@
 - Use subagents for parallel independent work (searching, reading files, implement + review).
 - **Size the fan-out to the work.** Mostly sequential work gets 2–3 agents, usually one implementer and one reviewer. Clearly distinct tasks can run 5–6 at once. Never more: 15 parallel agents on guest-bot burned a week's usage limit in about a day. Never run two agents that edit the same file. A project's CLAUDE.md or plan may set a lower cap.
 - **Keep every agent's context small** — each tool call re-sends all of it (guest-bot agents hit 200–500k tokens per task and the account limit mid-batch): grep and ranged reads, never whole large files; quiet targeted tests while working, the full suite once before the PR, never paste full logs; screenshots only for UI changes; high-effort review only for risky PRs (migrations, auth, money, privacy). Pattern: guest-bot `docs/cloud-sessions.md` «Working efficiently».
+
+### Build What Was Asked — No Silent Composition
+- **One control = one thing.** A user-facing button, command, menu entry, page section or notification shows what its label names. Never fold another section's content into it, append code-written lines to user-editable text, or attach buttons, links or follow-up messages the request didn't ask for. A link to another section is a labelled button, never its content pasted in.
+- **A gap is a question, not a design.** When a change leaves something without a home (an entry removed from a menu, a text with no button), ask the owner where it goes. Never pick a host for it yourself.
+- **Composition the owner does want is visible and switchable:** the admin's description says exactly where it shows, its preview shows the composed result, and a switch removes the extra part. Nothing an end user sees is decided only in code. A hide switch covers every surface its label claims, and the label names them.
+- **Attribute honestly.** Write «owner's decision / layout / call» in a PR, changelog or CLAUDE.md only with the owner's words or a link. Anything else is «implementer's choice — to confirm», listed under **Decisions to confirm** in the PR body so the owner can veto before merge. The PR's review lists every user-visible change that is not in the request.
+- It governs new changes. Behaviour a project already documents stays until the owner rules on it: list it for them, never delete it under this rule.
+- Pattern: guest-bot `docs/reviews/2026-10-18-silent-composition.md` (a venue button that silently also answered with the programme, labelled «owner's layout» with no owner ask behind it).
 
 ### After Every Correction
 - When the user corrects a mistake, update the relevant CLAUDE.md so it doesn't recur.
