@@ -14,8 +14,7 @@
 - Branch naming: `type/short-description` or `phase-N-description`
 - Squash merge to the default branch and keep GitHub's commit list in the message (the version's PATCH counts it). A repo that already uses merge commits keeps them.
 - **Push after EVERY commit. No exceptions.** Sessions can be interrupted — unpushed work is permanently lost.
-- **Commit after each meaningful unit of work**, not after all tasks are done. Never accumulate more than ~30 minutes of uncommitted work.
-- A "meaningful unit" = one logical change that doesn't break the build. Exception: files that must change together go in one commit.
+- **Commit after each meaningful unit of work** (one logical change that doesn't break the build; files that must change together go in one commit), not after all tasks are done. Never accumulate more than ~30 minutes of uncommitted work.
 - **Merge your own PRs** once review findings are fixed and CI is green. If a merge deploys, take the backup the project's CLAUDE.md asks for first. Stop and hand over only when a PR needs something only the owner can do (a BotFather setting, a secret, a payment), or when the project's CLAUDE.md says otherwise.
 - **Merge-as-you-go: one PR at a time.** Branch each phase from up-to-date `main`; when it's done and CI is green, merge it, then branch the next phase from the updated default branch. **Never stack PRs** — don't branch a phase off an unmerged phase branch (it chains the PRs, pollutes each diff with the previous phase, and forces rebase cascades). If work must continue before a merge, keep it on one evolving branch/PR, not a stack.
 - **NEVER force-push** or amend published commits unless explicitly asked.
@@ -76,15 +75,15 @@ Everything above the PROJECT section comes from the meta-repo (`geekkun/meta`); 
 - **It must change what another repo's session would do.** State it in one sentence without this repo's names. If you can't, it's project-only. A library gotcha counts only when its failure is silent and costly.
 - **Propose the exact text** (1–3 lines) and an existing layer: `shared`, `lang/<python|typescript|swift>` or `platform/<web|telegram-bot|ios|android>`. Implementation detail stays in this repo, referenced as `Pattern: <repo> <file>`.
 - A deviation also goes in this repo's PROJECT section as `**Deviates from meta:** <rule> — <reason> (meta#N)`, so sync never "fixes" it back and the audit can find it.
-- Never edit the synced sections above PROJECT in this repo: the next sync overwrites them. Change the rule in meta, or record the deviation.
+- Never edit the synced sections above PROJECT in this repo: the next sync overwrites them. From a project session, meta gets `upstream` issues only — never a commit, branch or PR, even when asked to «add it to meta»; the meta session adopts them.
 - No `gh` or no network (cloud sandbox, offline): append the same fields to `docs/meta-feedback.md` and commit it; the meta audit collects it.
 
 ## Versioning
 
 **The version is computed from git, never typed in. No agent bumps anything, so parallel PRs never conflict over it.**
-- **MINOR = PRs merged on the default branch**, **PATCH = that PR's commits** (a direct push to the default branch adds one). On an unmerged branch: the default branch's MINOR at the merge-base + 1. MAJOR = a deliberate edit of the script's anchor.
+- **MINOR = PRs merged on the default branch**, **PATCH = that PR's commits** (a direct push to the default branch adds one). On an unmerged branch: the default branch's MINOR at the merge-base + 1. **MAJOR = a deliberate edit of the script's anchor, in the PR that starts the major:** MAJOR+1, anchor = the default-branch tip it branches from, anchor MINOR = -1, so that PR reads X.0 on its branch and once merged. Pattern: imperiya_grez `scripts/version.sh`.
 - The project ships `scripts/version.sh [<rev>]` (POSIX sh, git only) that prints it. Pattern: guest-bot `scripts/version.sh` + `tests/test_version_script.py`; set its main-branch name, anchor commit and anchor MINOR when copying.
-- **The deploy writes it** to a file on the data volume (e.g. `data/VERSION`; images carry no `.git`), and the app reads that file once at startup — `0.0.0` when missing. No version line in the code, no pre-commit hook.
+- **The deploy bakes it into the image** (images carry no `.git`): `VERSION=$(sh scripts/version.sh) docker compose up -d --build` (compose `build.args: [VERSION]`), a Dockerfile `ARG VERSION=0.0.0` writes `/app/VERSION`, and the app reads that file once at startup — `0.0.0` when missing. Writing it to the data volume (`data/VERSION`) also works, but fails when the volume is root-owned. No version line in the code, no pre-commit hook. Pattern: cinema-support-bot `Dockerfile`, `deploy.yml`.
 - CI checks out full history (`fetch-depth: 0`) and fails if the script can't print a version. Squash merges keep GitHub's default commit list in the message (that's where PATCH comes from).
 - **This overrides any "bump PATCH/MINOR by hand" or pre-commit-hook rule** left in a project's CLAUDE.md or sub-CLAUDE.md files. Delete such a rule when you see one.
 - **A project still on a hand-written `VERSION`:** migrating is its own PR (anchor = the default-branch tip it branches from, anchor MINOR = the current MINOR). Until that PR merges, don't bump in a feature PR at all — leave the line alone and let the migration replace it. If an old bump hook is installed, commit with `--no-verify` or remove it from `.git/hooks`.
@@ -96,7 +95,8 @@ No changelog section in `CLAUDE.md`. **Each PR adds one file `docs/changes/YYYY-
 ## Code Review
 
 - **One issue = one GH comment.** Never group multiple issues into one comment.
-- **Post every finding you verified.** Post an unverified one too, labelled as unverified, instead of dropping it. Don't pad a review with style nits the linter already covers.
+- **Post every finding you verified.** Post an unverified one too, labelled as unverified, instead of dropping it.
+- **A review may find nothing.** If no finding is a real defect or risk, say «no problems found» at once and stop. Never pad a review with style, redundancy or speculative risks to look thorough; cleanups go on one separate «optional» line, never counted as findings.
 
 ## Code Quality
 
@@ -122,17 +122,17 @@ No changelog section in `CLAUDE.md`. **Each PR adds one file `docs/changes/YYYY-
 
 ## CI/CD
 
-- GitHub Actions for all projects
-- Shared workflow templates in `shared/.github/workflows/`
+- GitHub Actions for all projects; shared workflow templates in `shared/.github/workflows/`
 - **CI (PR):** lint with ruff → Docker build (Buildx + GHA cache) → import verify → tests, in **one job** (each job is billed rounded up to a whole minute). `concurrency` keyed by PR number, `cancel-in-progress` for PRs only (a main run is the deploy gate). Build the runtime image only on main.
 - **The runner is a switch, not a rewrite:** `runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '"ubuntu-latest"') }}` in CI and Deploy. `gh variable set CI_RUNS_ON --body '["self-hosted","<label>"]'` moves both to the owner's machine (free minutes, warm Docker cache: guest-bot 1 m 33 s vs 5 m 46 s); deleting the variable moves back. A job aimed at an offline runner waits up to 24 h: flip the variable. **Private repos only:** a self-hosted runner runs every PR's code as the runner user. **One runner = one job at a time:** for parallel PRs register a few runners per active repo (guest-bot: 3), give per-run Docker tags a `${{ github.run_id }}` suffix so concurrent jobs don't overwrite each other's image, and split the cores (`pytest -n <cores / total runners>`, not `-n auto`); personal-account runners are per repo, so budget across every repo on the Mac.
 - **Self-hosted gotchas:** `~` is the owner's home, so the deploy key and known_hosts go under `$RUNNER_TEMP` (trap-removed), never `~/.ssh`; `actions/setup-python` fails on any Mac but GitHub's (skip it when `runner.environment == 'self-hosted'`, use host Python in a `$RUNNER_TEMP` venv); buildx `driver: docker` with empty GHA cache inputs; clean up only the run's own image (`docker rmi <tag>`) and the CI's dangling layers by label (`docker image prune -f --filter label=<repo>-ci=1`). Detail: `docs/references/self-hosted-runner.md`.
+- **Pin ruff in `ruff-action`:** `with: version: "<exact>"` matching the `ruff` dev dependency. Unpinned, it resolves `^x` through the GitHub releases API and fails on a runner with an empty tool cache. Pattern: cinema-support-bot `.github/workflows/ci.yml`.
 - **Deploy (push to main):** build + test → SSH to VPS → `git pull && docker compose up -d --build` → health check
+- **Prefer pull deploy for a single box:** Deploy only fast-forwards a `release` branch to the newest green commit (`GITHUB_TOKEN` with `contents: write`; no SSH, no `VPS_*` secrets, works from any runner); a systemd timer on the box runs `deploy-self.sh`, which fetches it and runs the deploy steps locally behind a `flock`, records the deployed sha only after the health gate, and backs off on a failed sha. Several repos on one box: one templated unit per repo (independent timers) and a shared lock around the build step only. Pattern: guest-bot `scripts/deploy-self.sh`, `scripts/systemd/`, `.github/workflows/deploy.yml`; rows in `docs/references/guest-bot-patterns.md` §A.
 - `paths-ignore`: `**/*.md`, `docs/**`, `.claude/**`, `.gitignore`, `LICENSE` (and `tests/**` on deploy). A bare `*.md` matches only the repo root, so a docs-only PR touching a package's `CLAUDE.md` still deploys.
 - Required GitHub Secrets for deploy: `VPS_SSH_KEY`, `VPS_HOST`, `VPS_USER`, `VPS_PORT`, `DEPLOY_PATH`, plus `VPS_KNOWN_HOSTS` (the shared deploy template warns and falls back to `accept-new` without it)
 - **Fill `VPS_KNOWN_HOSTS` from the box itself:** `cat /etc/ssh/ssh_host_*_key.pub` over an SSH session you already trust, fingerprints checked against your local known_hosts, stored as `* <type> <key>` lines (the `*` works whatever `VPS_HOST` holds). The deploy uses `StrictHostKeyChecking=yes`. Never `ssh-keyscan` the shared box (its rate limit blocked port 22) and never `accept-new` on a fresh runner (it verifies nothing).
-- Django projects: add migration check (`makemigrations --check --dry-run`) to CI
-- Next.js projects: artifact-based deploy with PM2 process manager
+- Django projects: add migration check (`makemigrations --check --dry-run`) to CI. Next.js projects: artifact-based deploy with PM2 process manager.
 <!-- LAYER:shared:END -->
 
 <!-- LAYER:lang/swift:START -->
